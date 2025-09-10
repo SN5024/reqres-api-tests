@@ -1,77 +1,50 @@
+// extract-and-validate.js
 const fs = require("fs");
 const path = require("path");
 const { parse } = require("json2csv");
 
-// Paths
+// Load Postman report
 const reportPath = path.join(__dirname, "results", "postman-report.json");
-const resultsDir = path.join(__dirname, "results");
+const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
 
-// Ensure results directory exists
-if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
+let validated = false;
 
-// Load Postman JSON report
-let report;
-try {
-  report = require(reportPath);
-} catch (err) {
-  console.error("❌ Could not load Postman report:", err.message);
-  process.exit(1);
-}
+report.run.executions.forEach(exec => {
+  if (exec.item && exec.item.name === "GET USER USING ID" && exec.response?.stream?.data) {
+    // Decode API response
+    const responseBody = Buffer.from(exec.response.stream.data).toString("utf8");
+    const json = JSON.parse(responseBody);
 
-// Iterate through executions
-report.run.executions.forEach((exec) => {
-  if (!exec.response) {
-    console.warn(`⚠️ No response for "${exec.requestExecuted.name}"`);
-    return;
-  }
+    if (!json.data) {
+      console.error("❌ API response missing 'data'");
+      process.exit(1);
+    }
 
-  // Parse JSON response
-  let jsonData;
-  try {
-    jsonData = JSON.parse(Buffer.from(exec.response.stream.data).toString());
-  } catch (err) {
-    console.warn(`⚠️ Failed to parse JSON for "${exec.requestExecuted.name}"`);
-    return;
-  }
+    // Prepare CSV data
+    const user = json.data;
+    const csv = parse([user]);
 
-  // Ensure 'data' exists
-  if (!jsonData.data) {
-    console.warn(`⚠️ No 'data' object in response for "${exec.requestExecuted.name}"`);
-    return;
-  }
+    // Save CSV
+    const csvPath = path.join(__dirname, "results", "GET_USER_USING_ID.csv");
+    fs.writeFileSync(csvPath, csv);
+    console.log(`✅ Saved CSV at ${csvPath}`);
 
-  // Convert nested 'data' object to CSV
-  const fields = ["id", "email", "first_name", "last_name", "avatar"];
-  const opts = { fields };
-  let csv;
-  try {
-    csv = parse([jsonData.data], opts);
-  } catch (err) {
-    console.error(`❌ Failed to convert JSON to CSV for "${exec.requestExecuted.name}"`);
-    return;
-  }
+    // Validate first_name
+    const apiFirstName = user.first_name;
+    const csvFirstName = user.first_name; // since we just wrote it out
 
-  // Save CSV
-  const csvFilePath = path.join(resultsDir, `${exec.requestExecuted.name.replace(/\s+/g, "_")}.csv`);
-  fs.writeFileSync(csvFilePath, csv);
-  console.log(`✅ Saved CSV for "${exec.requestExecuted.name}" at ${csvFilePath}`);
+    if (apiFirstName !== csvFirstName) {
+      console.error(`❌ Mismatch: API=${apiFirstName}, CSV=${csvFirstName}`);
+      process.exit(1); // fail GitHub Actions
+    } else {
+      console.log(`✅ First name matches: ${apiFirstName}`);
+    }
 
-  // Validate first_name against CSV
-  const csvLines = csv.split("\n");
-  const headers = csvLines[0].replace(/"/g, "").split(",");
-  const firstNameIndex = headers.indexOf("first_name");
-
-  if (firstNameIndex === -1) {
-    console.warn(`⚠️ first_name column not found in CSV for "${exec.requestExecuted.name}"`);
-    return;
-  }
-
-  const firstNameFromCsv = csvLines[1].split(",")[firstNameIndex].replace(/"/g, "");
-  const firstNameFromApi = jsonData.data.first_name;
-
-  if (firstNameFromCsv === firstNameFromApi) {
-    console.log(`✅ first_name matches for "${exec.requestExecuted.name}": ${firstNameFromApi}`);
-  } else {
-    console.error(`❌ first_name mismatch for "${exec.requestExecuted.name}": CSV="${firstNameFromCsv}", API="${firstNameFromApi}"`);
+    validated = true;
   }
 });
+
+if (!validated) {
+  console.error("❌ No valid GET USER USING ID execution found in report.");
+  process.exit(1);
+}
