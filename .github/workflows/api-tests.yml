@@ -22,6 +22,11 @@ jobs:
       - name: Install dependencies
         run: npm install json2csv
 
+      - name: Install Postman CLI
+        run: |
+          curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
+          export PATH=$PATH:/home/runner/.postman
+
       - name: Run Postman Collection
         run: |
           mkdir -p results
