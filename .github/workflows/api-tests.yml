@@ -11,17 +11,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
 
-      - name: Install Postman CLI
-        run: |
-          curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
+      - name: Install dependencies
+        run: npm install json2csv
 
       - name: Run Postman Collection
         run: |
@@ -30,11 +29,11 @@ jobs:
             --reporters cli,json \
             --reporter-json-export results/postman-report.json
 
-      - name: Run Extract and Validate Script
+      - name: Validate API response with CSV
         run: node extract-and-validate.js
 
-      - name: Upload Results
+      - name: Upload results (CSV + report)
         uses: actions/upload-artifact@v4
         with:
-          name: postman-results
+          name: api-test-results
           path: results/

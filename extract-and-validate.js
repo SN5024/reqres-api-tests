@@ -1,50 +1,52 @@
 // extract-and-validate.js
 const fs = require("fs");
 const path = require("path");
-const { parse } = require("json2csv");
+const { Parser } = require("json2csv");
 
-// Load Postman report
 const reportPath = path.join(__dirname, "results", "postman-report.json");
-const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
 
-let validated = false;
-
-report.run.executions.forEach(exec => {
-  if (exec.item && exec.item.name === "GET USER USING ID" && exec.response?.stream?.data) {
-    // Decode API response
-    const responseBody = Buffer.from(exec.response.stream.data).toString("utf8");
-    const json = JSON.parse(responseBody);
-
-    if (!json.data) {
-      console.error("❌ API response missing 'data'");
-      process.exit(1);
-    }
-
-    // Prepare CSV data
-    const user = json.data;
-    const csv = parse([user]);
-
-    // Save CSV
-    const csvPath = path.join(__dirname, "results", "GET_USER_USING_ID.csv");
-    fs.writeFileSync(csvPath, csv);
-    console.log(`✅ Saved CSV at ${csvPath}`);
-
-    // Validate first_name
-    const apiFirstName = user.first_name;
-    const csvFirstName = user.first_name; // since we just wrote it out
-
-    if (apiFirstName !== csvFirstName) {
-      console.error(`❌ Mismatch: API=${apiFirstName}, CSV=${csvFirstName}`);
-      process.exit(1); // fail GitHub Actions
-    } else {
-      console.log(`✅ First name matches: ${apiFirstName}`);
-    }
-
-    validated = true;
-  }
-});
-
-if (!validated) {
-  console.error("❌ No valid GET USER USING ID execution found in report.");
+if (!fs.existsSync(reportPath)) {
+  console.error("❌ postman-report.json not found. Did Postman run?");
   process.exit(1);
 }
+
+const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+
+if (!report.run || !report.run.executions || report.run.executions.length === 0) {
+  console.error("❌ No executions found in Postman report.");
+  process.exit(1);
+}
+
+// Look for GET USER USING ID
+const exec = report.run.executions.find(e => e.item && e.item.name === "GET USER USING ID");
+
+if (!exec || !exec.response || !exec.response.stream) {
+  console.error("❌ No valid GET request response found.");
+  process.exit(1);
+}
+
+// Parse response body
+const responseBody = JSON.parse(exec.response.stream.toString());
+const user = responseBody.data;
+if (!user) {
+  console.error("❌ No `data` field in response.");
+  process.exit(1);
+}
+
+// Save CSV
+const csvPath = path.join(__dirname, "results", "GET_USER_USING_ID.csv");
+const parser = new Parser();
+const csv = parser.parse([user]);
+fs.writeFileSync(csvPath, csv, "utf8");
+console.log(`✅ Saved CSV for "${exec.item.name}" at ${csvPath}`);
+
+// Validate CSV content
+const csvData = fs.readFileSync(csvPath, "utf8").split("\n")[1]; // second line = first record
+const csvFirstName = csvData.split(",")[1]; // assuming "id,first_name,last_name,email,..."
+
+if (csvFirstName !== user.first_name) {
+  console.error(`❌ Validation failed: API first_name="${user.first_name}" but CSV has "${csvFirstName}"`);
+  process.exit(1);
+}
+
+console.log(`✅ Validation passed: first_name="${user.first_name}" matches CSV`);
