@@ -2,42 +2,39 @@ name: API Tests
 
 on:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
   pull_request:
-    branches:
-      - main
+    branches: [ "main" ]
 
 jobs:
-  api-tests:
+  test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 18
 
-      - name: Install Dependencies
+      - name: Install Postman CLI
         run: |
-          npm install json2csv
+          curl -o- "https://dl-cli.pstmn.io/install/linux64.sh" | sh
 
       - name: Run Postman Collection
         run: |
           mkdir -p results
-          npx postman collection run tests/reqres_api_postman_collection_with_tests.postman_collection.json \
+          postman collection run tests/reqres_api_postman_collection_with_tests.postman_collection.json \
             --reporters cli,json \
             --reporter-json-export results/postman-report.json
 
       - name: Run Extract and Validate Script
-        run: |
-          node extract-and-validate.js
+        run: node extract-and-validate.js
 
       - name: Upload Results
         uses: actions/upload-artifact@v4
         with:
-          name: api-test-results
+          name: postman-results
           path: results/
