@@ -1,52 +1,67 @@
-// extract-and-validate.js
-const fs = require("fs");
-const path = require("path");
-const { Parser } = require("json2csv");
+const fs = require('fs');
+const path = require('path');
+const { Parser } = require('json2csv');
 
-const reportPath = path.join(__dirname, "results", "postman-report.json");
+// Paths
+const reportPath = path.join(__dirname, 'results', 'postman-report.json');
+const resultsDir = path.join(__dirname, 'results');
 
+// Read Postman CLI report
 if (!fs.existsSync(reportPath)) {
-  console.error("❌ postman-report.json not found. Did Postman run?");
-  process.exit(1);
+    console.error('❌ postman-report.json not found!');
+    process.exit(1);
 }
 
-const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+const report = require(reportPath);
 
-if (!report.run || !report.run.executions || report.run.executions.length === 0) {
-  console.error("❌ No executions found in Postman report.");
-  process.exit(1);
+// Postman CLI v1.19 outputs an array of executions
+const getRequest = report.find(r => r.requestExecuted?.name === 'GET USER USING ID');
+
+if (!getRequest || !getRequest.response) {
+    console.error('❌ No valid GET request response found.');
+    process.exit(1);
 }
 
-// Look for GET USER USING ID
-const exec = report.run.executions.find(e => e.item && e.item.name === "GET USER USING ID");
+// Convert response stream buffer to JSON
+const responseData = JSON.parse(Buffer.from(getRequest.response.stream.data).toString());
 
-if (!exec || !exec.response || !exec.response.stream) {
-  console.error("❌ No valid GET request response found.");
-  process.exit(1);
-}
-
-// Parse response body
-const responseBody = JSON.parse(exec.response.stream.toString());
-const user = responseBody.data;
-if (!user) {
-  console.error("❌ No `data` field in response.");
-  process.exit(1);
-}
+// Prepare CSV data
+const csvData = [
+    {
+        id: responseData.data.id,
+        email: responseData.data.email,
+        first_name: responseData.data.first_name,
+        last_name: responseData.data.last_name,
+        avatar: responseData.data.avatar
+    }
+];
 
 // Save CSV
-const csvPath = path.join(__dirname, "results", "GET_USER_USING_ID.csv");
-const parser = new Parser();
-const csv = parser.parse([user]);
-fs.writeFileSync(csvPath, csv, "utf8");
-console.log(`✅ Saved CSV for "${exec.item.name}" at ${csvPath}`);
+if (!fs.existsSync(resultsDir)) fs.mkdirSync(resultsDir, { recursive: true });
 
-// Validate CSV content
-const csvData = fs.readFileSync(csvPath, "utf8").split("\n")[1]; // second line = first record
-const csvFirstName = csvData.split(",")[1]; // assuming "id,first_name,last_name,email,..."
+const csvFileName = `${getRequest.requestExecuted.name.replace(/\s+/g, '_')}.csv`;
+const csvFilePath = path.join(resultsDir, csvFileName);
 
-if (csvFirstName !== user.first_name) {
-  console.error(`❌ Validation failed: API first_name="${user.first_name}" but CSV has "${csvFirstName}"`);
-  process.exit(1);
+const parser = new Parser({ fields: Object.keys(csvData[0]) });
+const csv = parser.parse(csvData);
+
+fs.writeFileSync(csvFilePath, csv);
+console.log(`✅ Saved CSV for "${getRequest.requestExecuted.name}" at ${csvFilePath}`);
+
+// Validate first_name in CSV matches API response
+const csvContent = fs.readFileSync(csvFilePath, 'utf-8');
+const csvLines = csvContent.split('\n');
+const header = csvLines[0].split(',');
+const firstNameIndex = header.indexOf('first_name');
+
+if (firstNameIndex === -1) {
+    console.warn(`⚠️ first_name column not found in CSV for "${getRequest.requestExecuted.name}"`);
+} else {
+    const csvFirstName = csvLines[1].split(',')[firstNameIndex];
+    if (csvFirstName === responseData.data.first_name) {
+        console.log(`✅ Validation passed: CSV first_name matches API response (${csvFirstName})`);
+    } else {
+        console.error(`❌ Validation failed: CSV first_name (${csvFirstName}) does NOT match API response (${responseData.data.first_name})`);
+        process.exit(1); // Fail the GitHub Action
+    }
 }
-
-console.log(`✅ Validation passed: first_name="${user.first_name}" matches CSV`);
