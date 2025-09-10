@@ -19,22 +19,20 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Postman CLI
-        run: |
-          npm install -g postman
+      - name: Install Postman CLI locally
+        run: npm install postman
 
       - name: Run Postman Collection
         run: |
           mkdir -p results
-          postman collection run tests/reqres_api_postman_collection_with_tests.postman_collection.json \
+          npx postman collection run tests/reqres_api_postman_collection_with_tests.postman_collection.json \
             --reporters cli,json \
             --reporter-json-export results/postman-report.json
 
       - name: Run CSV Extraction and Validation
-        run: |
-          node extract-and-validate.js
+        run: node extract-and-validate.js
 
-      - name: Upload Results (optional)
+      - name: Upload Results
         uses: actions/upload-artifact@v4
         with:
           name: api-test-results
